@@ -52,6 +52,11 @@ class HookedNonBatchMemoryKVStore : public VersionedKVStore {
     return written;
   }
 
+  bool DeleteIfVersion(const std::string& key,
+                       std::uint64_t expected_version) override {
+    return backing_.DeleteIfVersion(key, expected_version);
+  }
+
   bool BatchPutIfVersion(const std::vector<VersionCheck>&,
                          const std::vector<WriteOp>&) override {
     return false;
@@ -114,6 +119,24 @@ KvTaskScript BuildConflictScript() {
   return script;
 }
 
+KvTaskScript BuildCreateThenRollbackScript() {
+  KvTaskScript script;
+  script.task_id = "non_batch_create_conflict";
+  script.objective = "rollback newly created key after fallback conflict";
+
+  KvBranchProgram branch;
+  branch.branch_id = "branch_create_conflict";
+  branch.score = 90.0;
+  branch.summary = "fallback create conflict winner";
+  branch.steps = {
+      MakeReadStep("input:fallback:3"),
+      MakeWriteStep("new:fallback:3", ObjectType::kText, IntentType::kOverwrite, "created"),
+      MakeWriteStep("counter:fallback:3", ObjectType::kRow, IntentType::kDelta, "2"),
+  };
+  script.branches.push_back(branch);
+  return script;
+}
+
 }  // namespace
 
 int main() {
@@ -151,5 +174,24 @@ int main() {
             << "\n";
   std::cout << "conflict_store_supports_batch="
             << conflict_store.SupportsAtomicBatchConditionalWrite() << "\n";
+
+  HookedNonBatchMemoryKVStore create_conflict_store;
+  create_conflict_store.Put("input:fallback:3", "seed");
+  create_conflict_store.Put("counter:fallback:3", "30");
+  create_conflict_store.ConfigureConflictHook(1, "counter:fallback:3", "30");
+
+  TaskRuntime create_conflict_runtime(create_conflict_store);
+  auto create_conflict_session =
+      RunScriptedKvTask(create_conflict_runtime, BuildCreateThenRollbackScript());
+  std::cout << "create_conflict_committed="
+            << (create_conflict_session.txn.status ==
+                data_agent_system::agent_txn::TxnStatus::kCommitted)
+            << "\n";
+  std::cout << "create_conflict_reason=" << create_conflict_session.txn.validation_result.reason
+            << "\n";
+  std::cout << "create_conflict_new_key_exists="
+            << create_conflict_store.Get("new:fallback:3").exists << "\n";
+  std::cout << "create_conflict_counter=" << create_conflict_store.Get("counter:fallback:3").value
+            << "\n";
   return 0;
 }

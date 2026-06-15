@@ -112,8 +112,24 @@ The repository now includes a minimal end-to-end implementation aligned with
 - `storage/non_batch_memory_kv_store.h` and
   `examples/non_batch_fallback_demo.cc` provide a first-pass fallback path for
   stores that do not support atomic batch conditional writes, including a demo
-  that shows sequential conditional commit and compensation rollback of earlier
-  writes when a later fallback write conflicts.
+  that shows sequential conditional commit, rollback on later-write conflict,
+  and deletion of newly created keys when fallback rollback unwinds a partial
+  commit.
+- `agent_txn/fallback_commit_log.h`,
+  `agent_txn/fallback_commit_recovery.h`, and
+  `examples/fallback_crash_safe_demo.cc` extend that path with a minimal
+  durable fallback artifact, so a process crash after partial non-batch writes
+  can be recovered by replaying the artifact and either rolling the remaining
+  writes forward to `COMMITTED` or rolling already-applied writes back.
+- `runtime/task_runtime.h` now exposes `FallbackCommitRuntimeConfig`, so
+  runtime-owned tasks on non-batch backends can automatically assign fallback
+  artifact paths, recover pending artifacts during startup, and archive or
+  delete terminal `COMMITTED` / `ROLLED_BACK` artifacts without hand-written
+  recovery plumbing in each caller.
+- `examples/semantic_contention_demo.cc` makes the current concurrency model
+  measurable under repeated write races: strict `OVERWRITE` aborts under
+  version drift, while `DELTA` uses commutative rebasing and continues to
+  commit under the same contention pattern.
 - `CMakeLists.txt` defines a small build target for the demo.
 
 ## Notes
@@ -159,9 +175,10 @@ The repository now includes a minimal end-to-end implementation aligned with
 - The current implementation is intentionally minimal. It establishes the
   transaction-upward architecture, but it does not yet include persistence,
   recovery logs, rich workload drivers, or production-grade conflict policies.
-- The non-batch fallback path is intentionally first-pass only: it currently
-  requires pre-existing target keys and uses in-band compensation writes rather
-  than a durable two-phase protocol.
+- The crash-safe non-batch fallback path is still intentionally minimal: it
+  now supports forward recovery and rollback of newly created keys, but it is
+  still not a full durable two-phase commit protocol with richer coordinator
+  states or external consensus.
 
 ## Build
 

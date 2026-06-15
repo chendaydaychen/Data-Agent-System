@@ -55,6 +55,20 @@ class FileKVStore : public VersionedKVStore {
     return PersistToDisk();
   }
 
+  bool DeleteIfVersion(const std::string& key,
+                       std::uint64_t expected_version) override {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = values_.find(key);
+    const std::uint64_t current_version = (it == values_.end()) ? 0 : it->second.version;
+    if (current_version != expected_version) {
+      return false;
+    }
+    if (it != values_.end()) {
+      values_.erase(it);
+    }
+    return PersistToDisk();
+  }
+
   bool BatchPutIfVersion(const std::vector<VersionCheck>& checks,
                          const std::vector<WriteOp>& writes) override {
     std::lock_guard<std::mutex> lock(mu_);

@@ -29,7 +29,7 @@ class ValidationManager {
       if (store.GetVersion(read.object_id) != read.observed_version) {
         ValidationResult result;
         result.success = false;
-        result.reason = "read version changed for " + read.object_id;
+        result.reason = "strict validation failed for " + read.object_id;
         return result;
       }
     }

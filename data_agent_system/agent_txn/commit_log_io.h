@@ -33,6 +33,39 @@ inline std::string EscapeCommitLogText(const std::string& input) {
   return output;
 }
 
+inline std::string UnescapeCommitLogText(const std::string& input) {
+  std::string output;
+  output.reserve(input.size());
+  bool escaped = false;
+  for (const char ch : input) {
+    if (escaped) {
+      switch (ch) {
+        case 't':
+          output.push_back('\t');
+          break;
+        case 'n':
+          output.push_back('\n');
+          break;
+        case '\\':
+          output.push_back('\\');
+          break;
+        default:
+          output.push_back(ch);
+          break;
+      }
+      escaped = false;
+    } else if (ch == '\\') {
+      escaped = true;
+    } else {
+      output.push_back(ch);
+    }
+  }
+  if (escaped) {
+    output.push_back('\\');
+  }
+  return output;
+}
+
 inline const char* TxnStatusName(TxnStatus status) {
   switch (status) {
     case TxnStatus::kRunning:

@@ -44,6 +44,13 @@ class RocksDbAdapter : public VersionedKVStore {
     return fallback_store_.PutIfVersion(key, expected_version, value);
   }
 
+  bool DeleteIfVersion(const std::string& key,
+                       std::uint64_t expected_version) override {
+    EnsureDirectory(root_path_);
+    WriteManifest();
+    return fallback_store_.DeleteIfVersion(key, expected_version);
+  }
+
   bool BatchPutIfVersion(const std::vector<VersionCheck>& checks,
                          const std::vector<WriteOp>& writes) override {
     EnsureDirectory(root_path_);

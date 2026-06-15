@@ -27,6 +27,11 @@ class NonBatchMemoryKVStore : public VersionedKVStore {
     return fallback_.PutIfVersion(key, expected_version, value);
   }
 
+  bool DeleteIfVersion(const std::string& key,
+                       std::uint64_t expected_version) override {
+    return fallback_.DeleteIfVersion(key, expected_version);
+  }
+
   bool BatchPutIfVersion(const std::vector<VersionCheck>&,
                          const std::vector<WriteOp>&) override {
     return false;

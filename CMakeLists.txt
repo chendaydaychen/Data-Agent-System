@@ -24,8 +24,14 @@ target_link_libraries(multi_object_atomicity_demo PRIVATE data_agent_system)
 add_executable(semantic_concurrency_demo examples/semantic_concurrency_demo.cc)
 target_link_libraries(semantic_concurrency_demo PRIVATE data_agent_system)
 
+add_executable(semantic_contention_demo examples/semantic_contention_demo.cc)
+target_link_libraries(semantic_contention_demo PRIVATE data_agent_system)
+
 add_executable(non_batch_fallback_demo examples/non_batch_fallback_demo.cc)
 target_link_libraries(non_batch_fallback_demo PRIVATE data_agent_system)
+
+add_executable(fallback_crash_safe_demo examples/fallback_crash_safe_demo.cc)
+target_link_libraries(fallback_crash_safe_demo PRIVATE data_agent_system)
 
 add_executable(synthetic_experiment examples/synthetic_experiment.cc)
 target_link_libraries(synthetic_experiment PRIVATE data_agent_system)

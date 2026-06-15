@@ -1,11 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
 
 #include "data_agent_system/agent_txn/agent_txn_manager.h"
+#include "data_agent_system/agent_txn/fallback_commit_log.h"
 #include "data_agent_system/agent_txn/rollback_manager.h"
 #include "data_agent_system/branch/branch_manager.h"
 #include "data_agent_system/runtime/execution_plan.h"
@@ -19,9 +21,48 @@
 
 namespace data_agent_system::runtime {
 
+enum class FallbackTerminalArtifactPolicy {
+  kKeep,
+  kDelete,
+  kArchive,
+};
+
+struct FallbackCommitRuntimeConfig {
+  std::string artifact_dir;
+  std::string archive_dir;
+  bool auto_recover_on_startup = false;
+  FallbackTerminalArtifactPolicy committed_artifact_policy =
+      FallbackTerminalArtifactPolicy::kArchive;
+  FallbackTerminalArtifactPolicy rolled_back_artifact_policy =
+      FallbackTerminalArtifactPolicy::kArchive;
+};
+
+struct FallbackArtifactMaintenanceResult {
+  std::size_t recovered_artifact_count = 0;
+  std::size_t archived_artifact_count = 0;
+  std::size_t deleted_artifact_count = 0;
+  std::size_t kept_terminal_artifact_count = 0;
+  std::size_t skipped_non_terminal_artifact_count = 0;
+  std::size_t parse_failure_count = 0;
+  std::size_t conflict_count = 0;
+  bool success = true;
+  std::string reason;
+};
+
 class TaskRuntime {
  public:
   explicit TaskRuntime(data_agent_system::storage::VersionedKVStore& store) : store_(store) {}
+
+  TaskRuntime(data_agent_system::storage::VersionedKVStore& store,
+              const FallbackCommitRuntimeConfig& fallback_commit_config)
+      : store_(store), fallback_commit_config_(fallback_commit_config) {
+    InitializeFallbackCommitRuntime();
+  }
+
+  const std::optional<FallbackArtifactMaintenanceResult>&
+  LastStartupFallbackMaintenanceResult() const {
+    return startup_fallback_maintenance_result_;
+  }
 
   bool RegisterContinuationHandler(const std::string& workload_name,
                                    const TaskContinuationHandler& handler) {
@@ -45,6 +86,7 @@ class TaskRuntime {
     session.task = task;
     session.plan = plan;
     session.txn = txn_manager_.Begin("txn:" + task.task_id, task.task_id);
+    ConfigureFallbackCommit(&session.txn);
     session.RecordEvent(TaskEventType::kSubmitTask, std::string(), std::string(), task.objective);
     for (const auto& branch_plan : plan.branch_plans) {
       txn_manager_.CreateBranch(session.txn, branch_plan.branch_id);
@@ -180,6 +222,12 @@ class TaskRuntime {
       session.RecordEvent(TaskEventType::kAbortTask, session.txn.winner_branch_id,
                           std::string(), session.txn.validation_result.reason);
     }
+    const bool finalized = FinalizeFallbackCommitArtifact(session.txn);
+    if (!session.txn.fallback_commit.artifact_path.empty()) {
+      session.task.SetMetadata("fallback_artifact_path", session.txn.fallback_commit.artifact_path);
+      session.task.SetMetadata("fallback_artifact_maintenance",
+                               finalized ? "finalized_or_pending" : "finalize_failed");
+    }
     return committed;
   }
 
@@ -196,6 +244,36 @@ class TaskRuntime {
 
   void AbortTask(data_agent_system::agent_txn::AgentTxnContext& txn) const {
     rollback_manager_.AbortTransaction(txn);
+  }
+
+  FallbackArtifactMaintenanceResult RecoverPendingFallbackCommits() const {
+    FallbackArtifactMaintenanceResult result;
+    if (fallback_commit_config_.artifact_dir.empty()) {
+      return result;
+    }
+
+    const auto recovery =
+        txn_manager_.RecoverFallbackCommits(fallback_commit_config_.artifact_dir, store_);
+    result.recovered_artifact_count = recovery.recovered_artifact_count;
+    result.parse_failure_count = recovery.parse_failure_count;
+    result.conflict_count = recovery.conflict_count;
+    result.success = recovery.success;
+    result.reason = recovery.reason;
+    if (!result.success) {
+      return result;
+    }
+
+    const auto maintenance = SweepTerminalFallbackArtifacts();
+    result.archived_artifact_count = maintenance.archived_artifact_count;
+    result.deleted_artifact_count = maintenance.deleted_artifact_count;
+    result.kept_terminal_artifact_count = maintenance.kept_terminal_artifact_count;
+    result.skipped_non_terminal_artifact_count = maintenance.skipped_non_terminal_artifact_count;
+    result.parse_failure_count += maintenance.parse_failure_count;
+    result.success = maintenance.success;
+    if (!maintenance.success) {
+      result.reason = maintenance.reason;
+    }
+    return result;
   }
 
   TaskRecoveryPlan LoadRecoveryPlanFromLog(const std::string& task_log_path) const {
@@ -285,6 +363,191 @@ class TaskRuntime {
   }
 
  private:
+  void InitializeFallbackCommitRuntime() {
+    if (fallback_commit_config_.artifact_dir.empty()) {
+      return;
+    }
+
+    EnsureDirectory(fallback_commit_config_.artifact_dir);
+    if (UsesArchivePolicy() && !fallback_commit_config_.archive_dir.empty()) {
+      EnsureDirectory(fallback_commit_config_.archive_dir);
+    }
+
+    if (fallback_commit_config_.auto_recover_on_startup) {
+      const auto result = RecoverPendingFallbackCommits();
+      startup_fallback_maintenance_result_ = result;
+      if (!result.success) {
+        throw std::runtime_error("failed to recover fallback commit artifacts: " + result.reason);
+      }
+      return;
+    }
+
+    const auto maintenance = SweepTerminalFallbackArtifacts();
+    startup_fallback_maintenance_result_ = maintenance;
+    if (!maintenance.success) {
+      throw std::runtime_error("failed to maintain fallback commit artifacts: " +
+                               maintenance.reason);
+    }
+  }
+
+  void ConfigureFallbackCommit(data_agent_system::agent_txn::AgentTxnContext* txn) const {
+    if (txn == nullptr || fallback_commit_config_.artifact_dir.empty() ||
+        store_.SupportsAtomicBatchConditionalWrite()) {
+      return;
+    }
+    txn->fallback_commit.artifact_path =
+        fallback_commit_config_.artifact_dir + "/" + txn->txn_id + ".fallback.log";
+  }
+
+  static void EnsureDirectory(const std::string& path) {
+    if (path.empty()) {
+      return;
+    }
+    std::error_code error;
+    std::filesystem::create_directories(path, error);
+    if (error) {
+      throw std::runtime_error("failed to create directory " + path + ": " + error.message());
+    }
+  }
+
+  bool FinalizeFallbackCommitArtifact(
+      const data_agent_system::agent_txn::AgentTxnContext& txn) const {
+    if (txn.fallback_commit.artifact_path.empty()) {
+      return true;
+    }
+
+    data_agent_system::agent_txn::FallbackCommitArtifact artifact;
+    if (!TryParseFallbackArtifact(txn.fallback_commit.artifact_path, &artifact)) {
+      return true;
+    }
+    if (!IsTerminalFallbackPhase(artifact.phase)) {
+      return true;
+    }
+
+    const auto policy = artifact.phase == data_agent_system::agent_txn::FallbackCommitPhase::kCommitted
+                            ? fallback_commit_config_.committed_artifact_policy
+                            : fallback_commit_config_.rolled_back_artifact_policy;
+    return ApplyTerminalFallbackArtifactPolicy(txn.fallback_commit.artifact_path, policy);
+  }
+
+  FallbackArtifactMaintenanceResult SweepTerminalFallbackArtifacts() const {
+    FallbackArtifactMaintenanceResult result;
+    if (fallback_commit_config_.artifact_dir.empty()) {
+      return result;
+    }
+
+    std::error_code error;
+    const auto artifact_dir = std::filesystem::path(fallback_commit_config_.artifact_dir);
+    if (!std::filesystem::exists(artifact_dir, error)) {
+      return result;
+    }
+    if (error) {
+      result.success = false;
+      result.reason = "failed to inspect artifact directory: " + error.message();
+      return result;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(artifact_dir, error)) {
+      if (error) {
+        result.success = false;
+        result.reason = "failed to iterate artifact directory: " + error.message();
+        return result;
+      }
+      if (!entry.is_regular_file()) {
+        continue;
+      }
+      const auto filename = entry.path().filename().string();
+      if (filename.size() < std::string(".fallback.log").size() ||
+          filename.substr(filename.size() - std::string(".fallback.log").size()) !=
+              ".fallback.log") {
+        continue;
+      }
+
+      data_agent_system::agent_txn::FallbackCommitArtifact artifact;
+      if (!data_agent_system::agent_txn::ParseFallbackCommitArtifact(entry.path().string(),
+                                                                     &artifact)) {
+        result.parse_failure_count += 1;
+        result.success = false;
+        result.reason = "failed to parse fallback artifact: " + entry.path().string();
+        return result;
+      }
+      if (!IsTerminalFallbackPhase(artifact.phase)) {
+        result.skipped_non_terminal_artifact_count += 1;
+        continue;
+      }
+
+      const auto policy =
+          artifact.phase == data_agent_system::agent_txn::FallbackCommitPhase::kCommitted
+              ? fallback_commit_config_.committed_artifact_policy
+              : fallback_commit_config_.rolled_back_artifact_policy;
+      if (policy == FallbackTerminalArtifactPolicy::kKeep) {
+        result.kept_terminal_artifact_count += 1;
+        continue;
+      }
+      if (!ApplyTerminalFallbackArtifactPolicy(entry.path().string(), policy)) {
+        result.success = false;
+        result.reason = "failed to finalize fallback artifact: " + entry.path().string();
+        return result;
+      }
+      if (policy == FallbackTerminalArtifactPolicy::kArchive) {
+        result.archived_artifact_count += 1;
+      } else if (policy == FallbackTerminalArtifactPolicy::kDelete) {
+        result.deleted_artifact_count += 1;
+      }
+    }
+
+    return result;
+  }
+
+  static bool IsTerminalFallbackPhase(
+      data_agent_system::agent_txn::FallbackCommitPhase phase) {
+    return phase == data_agent_system::agent_txn::FallbackCommitPhase::kCommitted ||
+           phase == data_agent_system::agent_txn::FallbackCommitPhase::kRolledBack;
+  }
+
+  bool ApplyTerminalFallbackArtifactPolicy(
+      const std::string& artifact_path,
+      FallbackTerminalArtifactPolicy policy) const {
+    if (policy == FallbackTerminalArtifactPolicy::kKeep) {
+      return true;
+    }
+
+    std::error_code error;
+    if (policy == FallbackTerminalArtifactPolicy::kDelete) {
+      std::filesystem::remove(artifact_path, error);
+      return !error;
+    }
+
+    if (fallback_commit_config_.archive_dir.empty()) {
+      return false;
+    }
+    EnsureDirectory(fallback_commit_config_.archive_dir);
+    const auto source_path = std::filesystem::path(artifact_path);
+    const auto target_path =
+        std::filesystem::path(fallback_commit_config_.archive_dir) / source_path.filename();
+    std::filesystem::remove(target_path, error);
+    error.clear();
+    std::filesystem::rename(source_path, target_path, error);
+    return !error;
+  }
+
+  static bool TryParseFallbackArtifact(
+      const std::string& artifact_path,
+      data_agent_system::agent_txn::FallbackCommitArtifact* artifact) {
+    std::error_code error;
+    if (!std::filesystem::exists(artifact_path, error) || error) {
+      return false;
+    }
+    return data_agent_system::agent_txn::ParseFallbackCommitArtifact(artifact_path, artifact);
+  }
+
+  bool UsesArchivePolicy() const {
+    return fallback_commit_config_.committed_artifact_policy ==
+               FallbackTerminalArtifactPolicy::kArchive ||
+           fallback_commit_config_.rolled_back_artifact_policy ==
+               FallbackTerminalArtifactPolicy::kArchive;
+  }
+
   static data_agent_system::intent::IntentType IntentTypeFromPersistedValue(std::int64_t value) {
     using data_agent_system::intent::IntentType;
     switch (value) {
@@ -414,6 +677,8 @@ class TaskRuntime {
   }
 
   data_agent_system::storage::VersionedKVStore& store_;
+  FallbackCommitRuntimeConfig fallback_commit_config_;
+  std::optional<FallbackArtifactMaintenanceResult> startup_fallback_maintenance_result_;
   data_agent_system::agent_txn::AgentTxnManager txn_manager_;
   data_agent_system::agent_txn::RollbackManager rollback_manager_;
   data_agent_system::branch::BranchManager branch_manager_;

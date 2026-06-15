@@ -37,6 +37,11 @@ class RedisAdapter : public VersionedKVStore {
     return fallback_store_.PutIfVersion(NamespacedKey(key), expected_version, value);
   }
 
+  bool DeleteIfVersion(const std::string& key,
+                       std::uint64_t expected_version) override {
+    return fallback_store_.DeleteIfVersion(NamespacedKey(key), expected_version);
+  }
+
   bool BatchPutIfVersion(const std::vector<VersionCheck>& checks,
                          const std::vector<WriteOp>& writes) override {
     std::vector<VersionCheck> namespaced_checks;

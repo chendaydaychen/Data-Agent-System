@@ -104,8 +104,14 @@ Current limitation:
 - The repository now includes a first-pass non-batch fallback path via
   [`storage/non_batch_memory_kv_store.h`](../data_agent_system/storage/non_batch_memory_kv_store.h)
   and the compensation logic in
-  [`agent_txn/commit_manager.h`](../data_agent_system/agent_txn/commit_manager.h),
-  but it is not yet a durable two-phase protocol.
+  [`agent_txn/commit_manager.h`](../data_agent_system/agent_txn/commit_manager.h).
+  It now also includes a minimal durable fallback artifact plus restart-time
+  recovery:
+  [`agent_txn/fallback_commit_log.h`](../data_agent_system/agent_txn/fallback_commit_log.h),
+  [`agent_txn/fallback_commit_recovery.h`](../data_agent_system/agent_txn/fallback_commit_recovery.h),
+  and [`examples/fallback_crash_safe_demo.cc`](../examples/fallback_crash_safe_demo.cc).
+  This now supports forward recovery of partial commits plus rollback of newly
+  created keys, but it is still not a full durable two-phase protocol.
 
 ## 5. Core Data Structures
 
@@ -424,10 +430,8 @@ Evidence:
 
 Still missing relative to the design direction:
 
-- durable submit / prepare / finalize logs
 - a proper two-phase write protocol
-- compensation recovery after process crash
-- support for creating entirely new keys in fallback rollback mode
+- richer coordinator states / quorum semantics beyond local artifact recovery
 
 ## 14. Recovery / Replay Extensions Beyond the Original Minimum
 
@@ -450,6 +454,12 @@ Evidence:
 - Commit-log recovery:
   - [`agent_txn/commit_log_recovery.h`](../data_agent_system/agent_txn/commit_log_recovery.h)
   - [`agent_txn/recovery_manager.h`](../data_agent_system/agent_txn/recovery_manager.h)
+- Runtime-managed fallback artifact recovery / archiving:
+  - [`runtime/task_runtime.h`](../data_agent_system/runtime/task_runtime.h)
+  - [`examples/fallback_crash_safe_demo.cc`](../examples/fallback_crash_safe_demo.cc)
+- Semantic contention demonstration:
+  - [`intent/policy_dispatcher.h`](../data_agent_system/intent/policy_dispatcher.h)
+  - [`examples/semantic_contention_demo.cc`](../examples/semantic_contention_demo.cc)
 
 ## Summary
 
@@ -468,6 +478,8 @@ What is still incomplete relative to the long-term design:
 
 - Real RocksDB / Redis integrations are missing.
 - Automatic intent recognition is missing.
-- The weaker-backend fallback path is only first-pass and not yet crash-safe.
+- The weaker-backend fallback path now supports crash-safe forward recovery and
+  rollback of newly created keys, but it is still not a full durable two-phase
+  commit protocol.
 - Workloads remain demo-oriented rather than planner- or agent-integrated.
 - Concurrency policy remains intentionally minimal rather than production-grade.

@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "data_agent_system/agent_txn/agent_txn_context.h"
+#include "data_agent_system/agent_txn/fallback_commit_log.h"
+#include "data_agent_system/agent_txn/fallback_commit_recovery.h"
 #include "data_agent_system/branch/branch_context.h"
 #include "data_agent_system/intent/policy_dispatcher.h"
 #include "data_agent_system/storage/versioned_kv_store.h"
@@ -56,19 +58,19 @@ class CommitManager {
         return false;
       }
       const auto current = store.Get(entry.object_id);
-      const auto resolved_value =
-          data_agent_system::intent::PolicyDispatcher::ResolveValue(entry, intent_it->second, current.value);
-      if (!resolved_value.has_value()) {
-        if (intent_it->second.intent_type == data_agent_system::intent::IntentType::kRead) {
-          continue;
-        }
+      const auto resolved =
+          data_agent_system::intent::PolicyDispatcher::ResolveWrite(entry, intent_it->second,
+                                                                    current.value);
+      if (!resolved.success) {
         if (failure != nullptr) {
           failure->success = false;
-          failure->reason = "failed to resolve write intent for " + entry.object_id;
+          failure->reason = resolved.reason.empty()
+                                ? "failed to resolve write intent for " + entry.object_id
+                                : resolved.reason + " for " + entry.object_id;
         }
         return false;
       }
-      if (intent_it->second.intent_type == data_agent_system::intent::IntentType::kRead) {
+      if (!resolved.should_write) {
         continue;
       }
       const bool semantic_rebase =
@@ -86,7 +88,7 @@ class CommitManager {
       }
       data_agent_system::storage::WriteOp write;
       write.key = entry.object_id;
-      write.value = *resolved_value;
+      write.value = resolved.value;
       writes.push_back(write);
     }
 
@@ -101,7 +103,7 @@ class CommitManager {
     const bool committed =
         store.SupportsAtomicBatchConditionalWrite()
             ? store.BatchPutIfVersion(checks, writes)
-            : CommitWinnerWithoutBatch(checks, writes, store, failure);
+            : CommitWinnerWithoutBatch(txn, checks, writes, store, failure);
     if (!committed) {
       if (failure != nullptr) {
         if (failure->reason.empty()) {
@@ -134,10 +136,15 @@ class CommitManager {
   };
 
   static bool CommitWinnerWithoutBatch(
+      const AgentTxnContext& txn,
       const std::vector<data_agent_system::storage::VersionCheck>& checks,
       const std::vector<data_agent_system::storage::WriteOp>& writes,
       data_agent_system::storage::VersionedKVStore& store,
       ValidationResult* failure) {
+    if (!txn.fallback_commit.artifact_path.empty()) {
+      return CommitWinnerWithoutBatchCrashSafe(txn, checks, writes, store, failure);
+    }
+
     std::unordered_map<std::string, std::uint64_t> expected_versions;
     for (const auto& check : checks) {
       expected_versions[check.key] = check.expected_version;
@@ -164,15 +171,6 @@ class CommitManager {
         }
         return false;
       }
-      if (!current.exists && current.version == 0) {
-        RollbackAppliedWrites(applied_writes, store, failure);
-        if (failure != nullptr && failure->reason.empty()) {
-          failure->success = false;
-          failure->reason =
-              "fallback commit requires pre-existing key for " + write.key;
-        }
-        return false;
-      }
 
       if (!store.PutIfVersion(write.key, expected_it->second, write.value)) {
         RollbackAppliedWrites(applied_writes, store, failure);
@@ -194,21 +192,118 @@ class CommitManager {
     return true;
   }
 
-  static bool RollbackAppliedWrites(const std::vector<AppliedWrite>& applied_writes,
-                                    data_agent_system::storage::VersionedKVStore& store,
-                                    ValidationResult* failure) {
-    for (auto it = applied_writes.rbegin(); it != applied_writes.rend(); ++it) {
-      if (!it->previous_exists) {
+  static bool CommitWinnerWithoutBatchCrashSafe(
+      const AgentTxnContext& txn,
+      const std::vector<data_agent_system::storage::VersionCheck>& checks,
+      const std::vector<data_agent_system::storage::WriteOp>& writes,
+      data_agent_system::storage::VersionedKVStore& store,
+      ValidationResult* failure) {
+    std::unordered_map<std::string, std::uint64_t> expected_versions;
+    for (const auto& check : checks) {
+      expected_versions[check.key] = check.expected_version;
+    }
+
+    FallbackCommitArtifact artifact;
+    artifact.txn_id = txn.txn_id;
+    artifact.task_id = txn.task_id;
+    artifact.phase = FallbackCommitPhase::kPrepared;
+    artifact.entries.reserve(writes.size());
+    for (const auto& write : writes) {
+      const auto expected_it = expected_versions.find(write.key);
+      if (expected_it == expected_versions.end()) {
         if (failure != nullptr) {
           failure->success = false;
-          failure->reason =
-              "fallback rollback does not support deleting newly created key " + it->key;
+          failure->reason = "missing expected version for " + write.key;
         }
         return false;
       }
 
+      const auto current = store.Get(write.key);
+      if (current.version != expected_it->second) {
+        if (failure != nullptr) {
+          failure->success = false;
+          failure->reason = "fallback write version changed for " + write.key;
+        }
+        return false;
+      }
+
+      FallbackCommitEntry entry;
+      entry.key = write.key;
+      entry.expected_version = expected_it->second;
+      entry.target_value = write.value;
+      entry.previous_value = current.value;
+      entry.previous_version = current.version;
+      entry.previous_exists = current.exists;
+      artifact.entries.push_back(entry);
+    }
+
+    if (!WriteFallbackCommitArtifact(artifact, txn.fallback_commit.artifact_path)) {
+      if (failure != nullptr) {
+        failure->success = false;
+        failure->reason = "failed to persist fallback prepare artifact";
+      }
+      return false;
+    }
+
+    for (const auto& entry : artifact.entries) {
+      const auto current = store.Get(entry.key);
+      if (current.version != entry.expected_version || !current.exists) {
+        if (failure != nullptr) {
+          failure->success = false;
+          failure->reason = "fallback write version changed for " + entry.key;
+        }
+        return RollbackCrashSafeArtifact(&artifact, txn.fallback_commit.artifact_path, store,
+                                         failure);
+      }
+      if (!store.PutIfVersion(entry.key, entry.expected_version, entry.target_value)) {
+        if (failure != nullptr) {
+          failure->success = false;
+          failure->reason = "fallback conditional write failed for " + entry.key;
+        }
+        return RollbackCrashSafeArtifact(&artifact, txn.fallback_commit.artifact_path, store,
+                                         failure);
+      }
+
+      artifact.applied_count += 1;
+      artifact.phase = FallbackCommitPhase::kApplying;
+      if (!WriteFallbackCommitArtifact(artifact, txn.fallback_commit.artifact_path)) {
+        if (failure != nullptr) {
+          failure->success = false;
+          failure->reason = "failed to persist fallback apply progress";
+        }
+        return false;
+      }
+      if (txn.fallback_commit.simulate_crash_after_apply_count > 0 &&
+          artifact.applied_count == txn.fallback_commit.simulate_crash_after_apply_count) {
+        if (failure != nullptr) {
+          failure->success = false;
+          failure->reason = "simulated crash during fallback commit";
+        }
+        return false;
+      }
+    }
+
+    artifact.phase = FallbackCommitPhase::kCommitted;
+    if (!WriteFallbackCommitArtifact(artifact, txn.fallback_commit.artifact_path)) {
+      if (failure != nullptr) {
+        failure->success = false;
+        failure->reason = "failed to persist fallback commit state";
+      }
+      return false;
+    }
+    return true;
+  }
+
+  static bool RollbackAppliedWrites(const std::vector<AppliedWrite>& applied_writes,
+                                    data_agent_system::storage::VersionedKVStore& store,
+                                    ValidationResult* failure) {
+    for (auto it = applied_writes.rbegin(); it != applied_writes.rend(); ++it) {
       const std::uint64_t rollback_expected_version = it->previous_version + 1;
-      if (!store.PutIfVersion(it->key, rollback_expected_version, it->previous_value)) {
+      const bool rolled_back =
+          it->previous_exists
+              ? store.PutIfVersion(it->key, rollback_expected_version, it->previous_value)
+              : store.DeleteIfVersion(it->key, rollback_expected_version);
+      if (!rolled_back) {
         if (failure != nullptr) {
           failure->success = false;
           failure->reason = "fallback rollback failed for " + it->key;
@@ -217,6 +312,22 @@ class CommitManager {
       }
     }
     return true;
+  }
+
+  static bool RollbackCrashSafeArtifact(FallbackCommitArtifact* artifact,
+                                        const std::string& artifact_path,
+                                        data_agent_system::storage::VersionedKVStore& store,
+                                        ValidationResult* failure) {
+    FallbackRecoveryResult recovery;
+    if (!ResumeRollbackFallbackCommit(artifact, artifact_path, store, &recovery)) {
+      if (failure != nullptr && failure->reason.empty()) {
+        failure->success = false;
+        failure->reason =
+            recovery.reason.empty() ? "fallback rollback failed" : recovery.reason;
+      }
+      return false;
+    }
+    return false;
   }
 
   static void AddOrVerifyCheck(const std::string& object_id,

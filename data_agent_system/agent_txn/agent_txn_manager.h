@@ -69,6 +69,12 @@ class AgentTxnManager {
     return recovery_manager_.RecoverFromDirectory(commit_log_dir, store);
   }
 
+  FallbackRecoveryResult RecoverFallbackCommits(
+      const std::string& artifact_dir,
+      data_agent_system::storage::VersionedKVStore& store) const {
+    return recovery_manager_.RecoverFallbackCommitsFromDirectory(artifact_dir, store);
+  }
+
  private:
   data_agent_system::branch::BranchManager branch_manager_;
   ValidationManager validation_manager_;

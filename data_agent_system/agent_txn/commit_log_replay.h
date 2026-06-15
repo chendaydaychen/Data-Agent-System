@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "data_agent_system/agent_txn/commit_log_io.h"
+
 namespace data_agent_system::agent_txn {
 
 struct ParsedCommitLogEntry {
@@ -26,39 +28,6 @@ struct ReplayedObjectState {
   std::uint64_t expected_version = 0;
   std::string source_log_path;
 };
-
-inline std::string UnescapeCommitLogText(const std::string& input) {
-  std::string output;
-  output.reserve(input.size());
-  bool escaped = false;
-  for (const char ch : input) {
-    if (escaped) {
-      switch (ch) {
-        case 't':
-          output.push_back('\t');
-          break;
-        case 'n':
-          output.push_back('\n');
-          break;
-        case '\\':
-          output.push_back('\\');
-          break;
-        default:
-          output.push_back(ch);
-          break;
-      }
-      escaped = false;
-    } else if (ch == '\\') {
-      escaped = true;
-    } else {
-      output.push_back(ch);
-    }
-  }
-  if (escaped) {
-    output.push_back('\\');
-  }
-  return output;
-}
 
 inline bool ParseCommitLogArtifact(const std::string& path, ParsedCommitLogArtifact* artifact) {
   if (artifact == nullptr) {

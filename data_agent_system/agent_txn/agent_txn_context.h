@@ -40,6 +40,11 @@ struct TxnMetrics {
   double commit_latency_us = 0.0;
 };
 
+struct FallbackCommitConfig {
+  std::string artifact_path;
+  std::size_t simulate_crash_after_apply_count = 0;
+};
+
 struct AgentTxnContext {
   std::string txn_id;
   std::string task_id;
@@ -49,6 +54,7 @@ struct AgentTxnContext {
   CommitLog commit_log;
   ValidationResult validation_result;
   TxnMetrics metrics;
+  FallbackCommitConfig fallback_commit;
 };
 
 }  // namespace data_agent_system::agent_txn
