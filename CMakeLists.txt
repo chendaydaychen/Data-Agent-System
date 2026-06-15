@@ -1,0 +1,58 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(DataAgentSystem LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(data_agent_system INTERFACE)
+target_include_directories(data_agent_system INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable(minimal_flow_demo examples/minimal_flow_demo.cc)
+target_link_libraries(minimal_flow_demo PRIVATE data_agent_system)
+
+add_executable(task_runtime_workflow examples/task_runtime_workflow.cc)
+target_link_libraries(task_runtime_workflow PRIVATE data_agent_system)
+
+add_executable(kv_style_workflow examples/kv_style_workflow.cc)
+target_link_libraries(kv_style_workflow PRIVATE data_agent_system)
+
+add_executable(multi_object_atomicity_demo examples/multi_object_atomicity_demo.cc)
+target_link_libraries(multi_object_atomicity_demo PRIVATE data_agent_system)
+
+add_executable(semantic_concurrency_demo examples/semantic_concurrency_demo.cc)
+target_link_libraries(semantic_concurrency_demo PRIVATE data_agent_system)
+
+add_executable(non_batch_fallback_demo examples/non_batch_fallback_demo.cc)
+target_link_libraries(non_batch_fallback_demo PRIVATE data_agent_system)
+
+add_executable(synthetic_experiment examples/synthetic_experiment.cc)
+target_link_libraries(synthetic_experiment PRIVATE data_agent_system)
+
+add_executable(commit_log_replay_demo examples/commit_log_replay_demo.cc)
+target_link_libraries(commit_log_replay_demo PRIVATE data_agent_system)
+
+add_executable(task_event_log_replay_demo examples/task_event_log_replay_demo.cc)
+target_link_libraries(task_event_log_replay_demo PRIVATE data_agent_system)
+
+add_executable(task_event_recovery_demo examples/task_event_recovery_demo.cc)
+target_link_libraries(task_event_recovery_demo PRIVATE data_agent_system)
+
+add_executable(task_runtime_recovery_demo examples/task_runtime_recovery_demo.cc)
+target_link_libraries(task_runtime_recovery_demo PRIVATE data_agent_system)
+
+add_executable(task_runtime_recovery_continue_demo examples/task_runtime_recovery_continue_demo.cc)
+target_link_libraries(task_runtime_recovery_continue_demo PRIVATE data_agent_system)
+
+add_executable(workload_recovery_registry_demo examples/workload_recovery_registry_demo.cc)
+target_link_libraries(workload_recovery_registry_demo PRIVATE data_agent_system)
+
+add_executable(agent_retry_loop_demo examples/agent_retry_loop_demo.cc)
+target_link_libraries(agent_retry_loop_demo PRIVATE data_agent_system)
+
+add_executable(commit_log_recovery_demo examples/commit_log_recovery_demo.cc)
+target_link_libraries(commit_log_recovery_demo PRIVATE data_agent_system)
+
+add_executable(commit_log_dir_recovery_demo examples/commit_log_dir_recovery_demo.cc)
+target_link_libraries(commit_log_dir_recovery_demo PRIVATE data_agent_system)

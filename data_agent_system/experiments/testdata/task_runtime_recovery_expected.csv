@@ -1,0 +1,5 @@
+task_id,recovery_action,recovery_command,target_branch_id,target_savepoint_id,plan_branch_count,event_count,commit_attempts,task_phase,summary
+task_0,SKIP_COMMITTED,NOOP,branch_2,,3,14,1,2,task already committed; no recovery work required
+task_1,SKIP_COMMITTED,NOOP,branch_2,,3,14,1,2,task already committed; no recovery work required
+task_2,RETRY_FROM_SCRATCH,SUBMIT_FRESH_TASK,branch_2,,3,14,1,3,restart task from a fresh submission
+task_resume,RESUME_FROM_SAVEPOINT,RESUME_FROM_SAVEPOINT,branch_B,before_edit,2,7,0,1,resume execution from the latest recorded savepoint

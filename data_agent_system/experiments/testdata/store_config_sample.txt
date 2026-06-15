@@ -1,0 +1,8 @@
+DAS_STORE_CONFIG_V1
+kind=redis
+path=
+namespace_prefix=synthetic
+host=127.0.0.1
+port=6379
+database_index=0
+column_family=default

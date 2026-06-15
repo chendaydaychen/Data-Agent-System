@@ -1,0 +1,18 @@
+DAS_COMMIT_LOG_V1
+txn_id=txn:task_0
+task_id=task_0
+status=COMMITTED
+winner_branch_id=branch_2
+validation_success=1
+validation_reason=
+branch_count=3
+planned_loser_count=2
+winner_commit_count=1
+real_abort_count=0
+conflict_abort_count=0
+validation_fail_count=0
+retry_count=0
+commit_latency_us=10
+entry_count=1
+[entries]
+output:task_0	1	result_0_2

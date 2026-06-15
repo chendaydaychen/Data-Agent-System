@@ -1,0 +1,24 @@
+DAS_TASK_EVENT_LOG_V1
+task_id=task_1
+txn_id=txn:task_1
+workload_name=synthetic.candidate_selection
+planner_id=synthetic_planner
+task_phase=2
+commit_attempts=1
+committed=1
+event_count=14
+[events]
+0	SUBMIT_TASK			0	synthetic candidate-selection workload
+1	CREATE_BRANCH	branch_0		0	candidate_0
+2	CREATE_BRANCH	branch_1		1	candidate_1
+3	CREATE_BRANCH	branch_2		2	candidate_2
+4	READ	branch_0	input:task_1	1	seed_1
+5	SAVEPOINT	branch_0		0	before_write
+6	WRITE	branch_0	output:task_1	2	::tentative
+7	ROLLBACK_TO_SAVEPOINT	branch_0		0	before_write
+8	WRITE	branch_0	output:task_1	1	result_1_0
+9	STAGE_BRANCH	branch_0		11	candidate_0
+10	READ	branch_1	input:task_1	1	seed_1
+11	WRITE	branch_1	output:task_1	1	result_1_1
+12	STAGE_BRANCH	branch_1		21	candidate_1
+13	COMMIT_TASK	branch_2		0	

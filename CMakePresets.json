@@ -1,0 +1,48 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "gcc11-release",
+      "displayName": "GCC 11.4 Release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-gcc11",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "/opt/gcc-11.4/bin/g++",
+        "CMAKE_BUILD_RPATH": "/opt/gcc-11.4/lib64",
+        "CMAKE_INSTALL_RPATH": "/opt/gcc-11.4/lib64"
+      }
+    },
+    {
+      "name": "gcc15-release",
+      "displayName": "GCC 15.2 Release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build-gcc15",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "/opt/gcc-15.2/bin/g++",
+        "CMAKE_BUILD_RPATH": "/opt/gcc-15.2/lib64",
+        "CMAKE_INSTALL_RPATH": "/opt/gcc-15.2/lib64"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-gcc11-release",
+      "displayName": "Build with GCC 11.4",
+      "configurePreset": "gcc11-release",
+      "jobs": 2
+    },
+    {
+      "name": "build-gcc15-release",
+      "displayName": "Build with GCC 15.2",
+      "configurePreset": "gcc15-release",
+      "jobs": 2
+    }
+  ]
+}

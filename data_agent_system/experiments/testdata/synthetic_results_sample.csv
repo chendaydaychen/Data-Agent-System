@@ -1,0 +1,4 @@
+task_id,committed,branch_count,planned_loser_count,winner_commit_count,real_abort_count,conflict_abort_count,validation_fail_count,retry_count,commit_latency_us
+task_0,1,3,2,1,0,0,0,0,10
+task_1,1,3,2,1,0,0,0,0,14
+task_2,0,3,2,0,1,1,1,0,30

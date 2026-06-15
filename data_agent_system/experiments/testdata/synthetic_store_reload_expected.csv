@@ -1,0 +1,7 @@
+key,version,value
+input:task_0,1,seed_0
+output:task_0,2,result_0_2
+input:task_1,1,seed_1
+output:task_1,2,result_1_2
+input:task_2,2,mutated_2
+output:task_2,1,draft_2

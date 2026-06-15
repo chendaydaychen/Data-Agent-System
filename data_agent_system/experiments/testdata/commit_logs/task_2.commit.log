@@ -1,0 +1,17 @@
+DAS_COMMIT_LOG_V1
+txn_id=txn:task_2
+task_id=task_2
+status=ABORTED
+winner_branch_id=branch_2
+validation_success=0
+validation_reason=read version changed for input:task_2
+branch_count=3
+planned_loser_count=2
+winner_commit_count=0
+real_abort_count=1
+conflict_abort_count=1
+validation_fail_count=1
+retry_count=0
+commit_latency_us=30
+entry_count=0
+[entries]

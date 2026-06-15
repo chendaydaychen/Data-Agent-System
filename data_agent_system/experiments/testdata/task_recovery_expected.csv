@@ -1,0 +1,5 @@
+task_id,txn_id,recovery_action,resume_branch_id,resume_savepoint_id,reason,source_log
+task_0,txn:task_0,SKIP_COMMITTED,branch_2,,task already committed,task_0.task.log
+task_1,txn:task_1,SKIP_COMMITTED,branch_2,,task already committed,task_1.task.log
+task_2,txn:task_2,RETRY_FROM_SCRATCH,branch_2,,read version changed for input:task_2,task_2.task.log
+task_resume,txn:task_resume,RESUME_FROM_SAVEPOINT,branch_B,before_edit,resume from latest savepoint before_edit,task_resume.task.log

@@ -1,0 +1,2 @@
+task_2	1	branch_2	1	recovered_result_2
+task_resume	1	branch_B	1	recovered_resume_result

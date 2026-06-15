@@ -1,0 +1,17 @@
+DAS_TASK_EVENT_LOG_V1
+task_id=task_resume
+txn_id=txn:task_resume
+workload_name=synthetic.candidate_selection
+planner_id=synthetic_planner
+task_phase=1
+commit_attempts=0
+committed=0
+event_count=7
+[events]
+0	SUBMIT_TASK			0	resume synthetic task
+1	CREATE_BRANCH	branch_A		0	candidate_A
+2	CREATE_BRANCH	branch_B		1	candidate_B
+3	READ	branch_B	input:task_resume	4	seed_resume
+4	SAVEPOINT	branch_B		0	before_edit
+5	WRITE	branch_B	output:task_resume	1	draft_resume
+6	STAGE_BRANCH	branch_B		88	candidate_B

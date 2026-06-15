@@ -1,0 +1,4 @@
+DAS_KV_JOURNAL_V1
+target=/home/cht/Data-Agent-System/data_agent_system/experiments/testdata/synthetic_store_recovery_base.tsv
+temp=/home/cht/Data-Agent-System/data_agent_system/experiments/testdata/synthetic_store_recovery_base.tsv.tmp
+mode=replace_with_temp
